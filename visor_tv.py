@@ -254,11 +254,21 @@ def generar_matriz_poule(db_ref, arma, genero):
     cols = [str(i) for i in range(1, n+1)] + ["V", "V/M", "TD", "TR", "Ind"]
     df = pd.DataFrame(index=range(1, n+1), columns=cols)
     
+    def obtener_abreviatura(escuela):
+        esc_upper = escuela.upper()
+        if "MILITAR" in esc_upper: return "ESMIL"
+        if "PDI" in esc_upper or "INVESTIGACIONES" in esc_upper or "ESCIPOL" in esc_upper: return "ESCIPOL"
+        if "CARABINEROS" in esc_upper: return "ESCAR"
+        if "NAVAL" in esc_upper: return "NAVAL"
+        if "AVIACION" in esc_upper or "AVIACIÓN" in esc_upper: return "AVIACION"
+        return esc_upper[:5]
+
     nombres_disp = []
     for i, tr in enumerate(tiradores_validos):
         row_idx = i + 1
         ida = tr["id_esgrimista"]
-        nombres_disp.append(f"{row_idx}. {tr['nombre']} ({tr['id_escuela'][:3]})")
+        abrev = obtener_abreviatura(tr['id_escuela'])
+        nombres_disp.append(f"{row_idx}. {tr['nombre']} ({abrev})")
         s = stats[ida]
         
         if s["expulsado"]:
