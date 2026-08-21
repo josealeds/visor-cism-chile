@@ -367,7 +367,7 @@ else:
     df_matriz = generar_matriz_poule(db, arma_act, gen_act)
     if df_matriz is not None:
         columnas_estilo = [str(i) for i in range(1, len(df_matriz)+1)]
-        st.dataframe(df_matriz.style.applymap(estilo_matriz, subset=columnas_estilo), use_container_width=True)
+        st.dataframe(df_matriz.style.map(estilo_matriz, subset=columnas_estilo), use_container_width=True)
     else:
         st.info("Esperando inicio de asaltos para generar la matriz cruzada...")
 
