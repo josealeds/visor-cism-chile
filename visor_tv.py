@@ -299,11 +299,35 @@ else:
     nom_t = db["Configuracion_Torneo"][0].get("nombre_torneo", "Torneo CISM")
     st.markdown(f"<h1>{nom_t}</h1>", unsafe_allow_html=True)
     
-    categorias = [("Espada", "Masculino"), ("Espada", "Femenino"), 
-                  ("Florete", "Masculino"), ("Florete", "Femenino"), 
-                  ("Sable", "Masculino"), ("Sable", "Femenino")]
+    # Lectura del Control Remoto
+    config_tv = db.get("Configuracion_VisorTV", {
+        "tiempo_rotacion": 12,
+        "categorias_activas": [
+            "Espada Masculino", "Espada Femenino", 
+            "Florete Masculino", "Florete Femenino", 
+            "Sable Masculino", "Sable Femenino"
+        ]
+    })
     
+    cats_activas_str = config_tv.get("categorias_activas", [])
+    
+    if not cats_activas_str:
+        st.warning("No hay categorías configuradas para mostrar en el visor. (Revise la Mesa de Control)")
+        time.sleep(5)
+        st.rerun()
+        
+    categorias = []
+    for c in cats_activas_str:
+        partes = c.split(" ")
+        if len(partes) == 2:
+            categorias.append((partes[0], partes[1]))
+            
     if 'tv_idx' not in st.session_state: st.session_state.tv_idx = 0
+    
+    # Escudo protector de índice (por si la Mesa de Control reduce la cantidad de armas)
+    if st.session_state.tv_idx >= len(categorias):
+        st.session_state.tv_idx = 0
+        
     cat_actual = categorias[st.session_state.tv_idx]
     arma_act, gen_act = cat_actual
     
@@ -371,6 +395,7 @@ else:
     else:
         st.info("Esperando inicio de asaltos para generar la matriz cruzada...")
 
-    time.sleep(12)
+    tiempo_rotacion = config_tv.get("tiempo_rotacion", 12)
+    time.sleep(tiempo_rotacion)
     st.session_state.tv_idx = (st.session_state.tv_idx + 1) % len(categorias)
     st.rerun()
