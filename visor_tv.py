@@ -1,251 +1,321 @@
 import streamlit as st
 import pandas as pd
-import json
 import requests
 import time
-import re
 
-st.set_page_config(page_title="CISM - Resultados en Vivo", layout="wide", initial_sidebar_state="collapsed")
+# --- CONFIGURACIÓN PARA PANTALLA DE TV ---
+st.set_page_config(page_title="Visor TV - CISM", layout="wide", initial_sidebar_state="collapsed")
 
-# REEMPLAZA con la misma URL que usaste en app.py
+# REEMPLAZA ESTO CON TU URL EXACTA
 DB_URL = "https://torneo-cism-default-rtdb.firebaseio.com/torneo_db.json"
 
-def cargar_db():
-    try:
-        respuesta = requests.get(DB_URL)
-        if respuesta.status_code == 200 and respuesta.json() is not None:
-            return respuesta.json()
-        return {}
-    except:
-        return {}
-
-# Ocultar menús y ajustar márgenes, preparando el espacio exacto para el pie de página
+# Estilos CSS para Pantalla Gigante (TV)
 st.markdown("""
     <style>
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    .block-container {padding-top: 1rem; padding-bottom: 2rem;}
-    .footer-text {text-align: center; color: #7f8c8d; font-size: 14px; margin-top: 40px; padding-top: 10px; border-top: 1px solid #bdc3c7;}
+    .block-container { padding-top: 1rem; padding-bottom: 0rem; }
+    h1 { text-align: center; color: #BA8E23; font-size: 3rem !important; text-transform: uppercase; margin-bottom: 0px; }
+    h2 { text-align: center; color: #ecf0f1; font-size: 2rem !important; margin-top: 0px; }
+    .estado-box { text-align: center; font-size: 1.5rem; font-weight: bold; padding: 10px; border-radius: 10px; margin-bottom: 20px;}
+    .en-curso { background-color: #27ae60; color: white; }
+    .finalizada { background-color: #c0392b; color: white; }
+    
+    /* Aumentar tamaño de tablas para TV */
+    div[data-testid="stDataFrame"] { font-size: 1.2rem; }
     </style>
 """, unsafe_allow_html=True)
 
+def cargar_db():
+    try:
+        r = requests.get(DB_URL)
+        if r.status_code == 200 and r.json():
+            return r.json()
+    except:
+        pass
+    return {}
+
 db = cargar_db()
 
-if not db or not db.get("Esgrimistas"):
-    st.title("Esperando inicio de la competencia...")
-    time.sleep(10)
-    st.rerun()
-
-config = db.get("Configuracion_Torneo", [{}])[0] if db.get("Configuracion_Torneo") else {}
-nombre_t = config.get("nombre_torneo", "Torneo Interescuelas Matrices CISM")
-fecha_t = config.get("fecha_torneo", "")
-texto_fecha = f" - {fecha_t}" if fecha_t else ""
-
-# Título global inamovible
-st.title(f"🏆 {nombre_t} - Pizarra Oficial{texto_fecha}")
-st.write("---")
-
-estados = db.get("Estado_Categorias", {})
-computo_masc = db.get("Computo_Masc", {})
-computo_fem = db.get("Computo_Fem", {})
-
-# Detectar categorías inscritas
-categorias_activas = sorted(list(set(f"{e['arma']}_{e['genero']}" for e in db.get("Esgrimistas", []))))
-
-todas_finalizadas = False
-if categorias_activas:
-    todas_finalizadas = all(estados.get(cat) == "FINALIZADA" for cat in categorias_activas)
-
-# --- MODO CARRUSEL PARA TV ---
-if "tv_index" not in st.session_state:
-    st.session_state.tv_index = 0
+# --- MOTOR MATEMÁTICO V4.7 (IDÉNTICO A LA MESA DE CONTROL) ---
+def calcular_ranking_equipos_tv(db_ref, arma, genero):
+    teams = set()
+    for e in db_ref.get("Encuentros_Equipos", []):
+        if e["arma"] == arma and e["genero"] == genero:
+            teams.add(e["id_escuela_1_3"]); teams.add(e["id_escuela_4_6"])
+    teams = list(teams)
     
-# El carrusel elimina la Info de Control. Solo rota entre armas.
-carrusel = list(categorias_activas)
-
-# Si todo terminó, agregamos la diapositiva del Cómputo General al final del bucle
-if todas_finalizadas and len(categorias_activas) > 0:
-    carrusel.append("COMPUTO_GENERAL")
-
-if not carrusel:
-    st.info("Procesando datos del torneo...")
-    st.markdown("<div class='footer-text'>Sistema de Gestión CISM Chile v4.6, diseñado por el maestro José De Sousa</div>", unsafe_allow_html=True)
-    time.sleep(10)
-    st.rerun()
+    match_results = {t: {} for t in teams}
+    bouts_won = {t: {} for t in teams}
+    td_dict = {t: {} for t in teams}
+    tr_dict = {t: {} for t in teams}
     
-# Extraer la diapositiva que corresponde a este ciclo
-diapositiva_actual = carrusel[st.session_state.tv_index % len(carrusel)]
-
-if diapositiva_actual == "COMPUTO_GENERAL":
-    st.header("🏆 CÓMPUTO GENERAL DEFINITIVO (COPA)")
+    equipos_expulsados = db_ref.get("Equipos_Expulsados", [])
     
-    df_m = pd.DataFrame(computo_masc).T
-    df_f = pd.DataFrame(computo_fem).T
-    
-    col_c1, col_c2 = st.columns(2)
-    
-    if not df_m.empty and not df_f.empty:
-        with col_c1:
-            st.subheader("MASCULINO")
-            st.dataframe(df_m, use_container_width=True)
-        with col_c2:
-            st.subheader("FEMENINO")
-            st.dataframe(df_f, use_container_width=True)
+    for e in db_ref.get("Encuentros_Equipos", []):
+        if e["arma"] == arma and e["genero"] == genero:
+            eq1, eq2, eid = e["id_escuela_1_3"], e["id_escuela_4_6"], e["id_encuentro"]
+            is_eq1_exp = f"{eq1}_{arma}_{genero}" in equipos_expulsados
+            is_eq2_exp = f"{eq2}_{arma}_{genero}" in equipos_expulsados
             
-        st.write("---")
-        st.subheader("🏅 GRAN TOTAL POR INSTITUCIÓN")
-        df_totales = pd.DataFrame([df_m.sum(), df_f.sum()], index=["TOTAL MASCULINO", "TOTAL FEMENINO"])
-        df_totales.loc["GRAN TOTAL (COPA)"] = df_totales.sum()
-        df_totales = df_totales.sort_values(by="GRAN TOTAL (COPA)", axis=1, ascending=False)
-        
-        st.dataframe(df_totales.style.apply(
-            lambda x: [f'background-color: #BA8E23; color: white; font-weight: bold; font-size: 18px' if x.name == 'GRAN TOTAL (COPA)' else 'font-size: 16px' for _ in x], 
-            axis=1
-        ), use_container_width=True)
-
-else:
-    # Renderizado de Armas específicas
-    arma, gen = diapositiva_actual.split("_")
-    estado_cat = estados.get(diapositiva_actual, "EN CURSO")
-    
-    esgrimistas_cat = [e for e in db.get("Esgrimistas", []) if e["arma"] == arma and e["genero"] == gen]
-    
-    # Ajuste dinámico de encabezados según el estado
-    if estado_cat == "FINALIZADA":
-        st.markdown(f"## 🔴 RESULTADOS FINALES: {arma} - {gen}")
-        st.markdown(f"**Atletas Inscritos:** {len(esgrimistas_cat)} &nbsp;&nbsp;|&nbsp;&nbsp; **Estado:** CATEGORÍA CERRADA OFICIALMENTE")
-    else:
-        max_ronda = 0
-        for e in db.get("Encuentros_Equipos", []):
-            if e["arma"] == arma and e["genero"] == gen:
-                r_str = e["ronda"]
-                if r_str.startswith("R") and r_str[1:].isdigit():
-                    num = int(r_str[1:])
-                    if num > max_ronda: max_ronda = num
-        ronda_actual = f"Ronda {max_ronda + 1}" if max_ronda > 0 else "Ronda 1"
-        st.markdown(f"## 🟢 EN PISTA: {arma} - {gen}")
-        st.markdown(f"**Atletas Inscritos:** {len(esgrimistas_cat)} &nbsp;&nbsp;|&nbsp;&nbsp; **Fase del Torneo:** {ronda_actual}")
-    
-    def calcular_tablas_tv(rk_arma, rk_gen, db, estado):
-        # 1. Procesamiento de Equipos
-        teams_stats = {}
-        for e in db.get("Encuentros_Equipos", []):
-            if e["arma"] == rk_arma and e["genero"] == rk_gen:
-                eid = e["id_encuentro"]
-                eq1 = e["id_escuela_1_3"]
-                eq2 = e["id_escuela_4_6"]
-                for eq in [eq1, eq2]:
-                    if eq not in teams_stats:
-                        teams_stats[eq] = {"pj": 0, "pg": 0, "td": 0, "tr": 0, "v_indiv": 0}
-                
-                bouts_entry = next((b for b in db.get("Asaltos_Bouts", []) if b["id_encuentro"] == eid), None)
+            bouts_entry = next((b for b in db_ref.get("Asaltos_Bouts", []) if b["id_encuentro"] == eid), None)
+            
+            if is_eq1_exp and not is_eq2_exp:
+                match_results[eq1][eq2] = eq2; match_results[eq2][eq1] = eq2
+                bouts_won[eq1][eq2], bouts_won[eq2][eq1] = 0, 9
+                td_dict[eq1][eq2], td_dict[eq2][eq1] = 0, 45
+                tr_dict[eq1][eq2], tr_dict[eq2][eq1] = 45, 0
+            elif is_eq2_exp and not is_eq1_exp:
+                match_results[eq1][eq2] = eq1; match_results[eq2][eq1] = eq1
+                bouts_won[eq1][eq2], bouts_won[eq2][eq1] = 9, 0
+                td_dict[eq1][eq2], td_dict[eq2][eq1] = 45, 0
+                tr_dict[eq1][eq2], tr_dict[eq2][eq1] = 0, 45
+            elif is_eq1_exp and is_eq2_exp:
+                match_results[eq1][eq2] = None
+                bouts_won[eq1][eq2], bouts_won[eq2][eq1] = 0, 0
+                td_dict[eq1][eq2], td_dict[eq2][eq1] = 0, 0
+                tr_dict[eq1][eq2], tr_dict[eq2][eq1] = 0, 0
+            else:
                 if bouts_entry and len(bouts_entry.get("bouts", [])) > 0:
                     td1 = sum(b["toques_a"] for b in bouts_entry["bouts"])
                     td2 = sum(b["toques_b"] for b in bouts_entry["bouts"])
-                    teams_stats[eq1]["pj"] += 1; teams_stats[eq2]["pj"] += 1
-                    teams_stats[eq1]["td"] += td1; teams_stats[eq1]["tr"] += td2
-                    teams_stats[eq2]["td"] += td2; teams_stats[eq2]["tr"] += td1
+                    bw1 = sum(1 for b in bouts_entry["bouts"] if b["toques_a"] > b["toques_b"])
+                    bw2 = sum(1 for b in bouts_entry["bouts"] if b["toques_b"] > b["toques_a"])
                     
-                    if td1 > td2: teams_stats[eq1]["pg"] += 1
-                    elif td2 > td1: teams_stats[eq2]["pg"] += 1
-                    
-                    # Conteo de Victorias en Combates Individuales dentro del equipo
-                    for b in bouts_entry["bouts"]:
-                        if b["toques_a"] > b["toques_b"]: teams_stats[eq1]["v_indiv"] += 1
-                        elif b["toques_b"] > b["toques_a"]: teams_stats[eq2]["v_indiv"] += 1
+                    if td1 > td2: match_results[eq1][eq2], match_results[eq2][eq1] = eq1, eq1
+                    elif td2 > td1: match_results[eq1][eq2], match_results[eq2][eq1] = eq2, eq2
                         
-        tabla_eq = [{"Escuela": eq.replace("_", " "), "PJ": s["pj"], "PG": s["pg"], "V. Indiv.": s["v_indiv"], "TD": s["td"], "Índice": s["td"]-s["tr"]} for eq, s in teams_stats.items()]
-        df_eq = pd.DataFrame(tabla_eq)
-        if not df_eq.empty:
-            df_eq = df_eq.sort_values(by=["PG", "Índice", "TD"], ascending=False).reset_index(drop=True)
-            df_eq.index = df_eq.index + 1
-            # Inyectar Puntos CISM si la categoría está cerrada
-            if estado == "FINALIZADA":
-                pts_eq = {1: 15, 2: 12, 3: 10, 4: 8, 5: 6}
-                df_eq["Puntos CISM"] = [pts_eq.get(i, 0) for i in df_eq.index]
-            
-        # 2. Procesamiento Individual
-        esg_ag = [es for es in db.get("Esgrimistas", []) if es["arma"] == rk_arma and es["genero"] == rk_gen]
-        ind_stats = {es["id_esgrimista"]: {"nombre": es["nombre"], "v": 0, "m": 0, "td": 0, "tr": 0} for es in esg_ag}
+                    bouts_won[eq1][eq2], bouts_won[eq2][eq1] = bw1, bw2
+                    td_dict[eq1][eq2], td_dict[eq2][eq1] = td1, td2
+                    tr_dict[eq1][eq2], tr_dict[eq2][eq1] = td2, td1
+
+    overall_stats = {t: {'pg': 0, 'bw': 0, 'td': 0, 'tr': 0, 'ind': 0, 'expulsado': f"{t}_{arma}_{genero}" in equipos_expulsados} for t in teams}
+    for t1 in teams:
+        for t2 in teams:
+            if t1 == t2: continue
+            if match_results.get(t1, {}).get(t2) == t1: overall_stats[t1]['pg'] += 1
+            overall_stats[t1]['bw'] += bouts_won.get(t1, {}).get(t2, 0)
+            overall_stats[t1]['td'] += td_dict.get(t1, {}).get(t2, 0)
+            overall_stats[t1]['tr'] += tr_dict.get(t1, {}).get(t2, 0)
+        overall_stats[t1]['ind'] = overall_stats[t1]['td'] - overall_stats[t1]['tr']
+
+    active_teams = [t for t in teams if not overall_stats[t]['expulsado']]
+    expelled_teams = [t for t in teams if overall_stats[t]['expulsado']]
+
+    def group_by_metric(teams_list, metric_dict):
+        grouped = {}
+        for t in teams_list:
+            val = metric_dict[t]
+            if val not in grouped: grouped[val] = []
+            grouped[val].append(t)
+        return [grouped[val] for val in sorted(grouped.keys(), reverse=True)]
+
+    def resolve_tie(tied_group):
+        if len(tied_group) <= 1: return [tied_group]
+        internal_pg = {t: sum(1 for t2 in tied_group if t!=t2 and match_results.get(t, {}).get(t2) == t) for t in tied_group}
+        groups = group_by_metric(tied_group, internal_pg)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
         
-        for p in db.get("Poules_Ronda0", []):
-            if p["arma"] == rk_arma and p["genero"] == rk_gen:
-                esc_p_id = p["escuela"].replace(" ", "_").upper()
-                t_p = [es for es in esg_ag if es["id_escuela"] == esc_p_id and es.get("estado_competencia", "Activo") == "Activo"]
-                if len(t_p) >= 3:
-                    for b in p.get("bouts", []):
-                        ia, ib, ta, tb = b["t_idx_a"], b["t_idx_b"], b["toques_a"], b["toques_b"]
-                        id_a, id_b = t_p[ia]["id_esgrimista"], t_p[ib]["id_esgrimista"]
-                        ind_stats[id_a]["m"] += 1; ind_stats[id_a]["td"] += ta; ind_stats[id_a]["tr"] += tb
+        internal_bw = {t: sum(bouts_won.get(t, {}).get(t2, 0) for t2 in tied_group if t!=t2) for t in tied_group}
+        groups = group_by_metric(tied_group, internal_bw)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
+        internal_ind = {t: sum(td_dict.get(t, {}).get(t2, 0) - tr_dict.get(t, {}).get(t2, 0) for t2 in tied_group if t!=t2) for t in tied_group}
+        groups = group_by_metric(tied_group, internal_ind)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
+        overall_bw_metric = {t: overall_stats[t]['bw'] for t in tied_group}
+        groups = group_by_metric(tied_group, overall_bw_metric)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
+        overall_ind_metric = {t: overall_stats[t]['ind'] for t in tied_group}
+        groups = group_by_metric(tied_group, overall_ind_metric)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
+        overall_td_metric = {t: overall_stats[t]['td'] for t in tied_group}
+        groups = group_by_metric(tied_group, overall_td_metric)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
+        return [tied_group]
+        
+    initial_groups = group_by_metric(active_teams, {t: overall_stats[t]['pg'] for t in active_teams})
+    final_ranking = []
+    for g in initial_groups: final_ranking.extend(resolve_tie(g))
+    if expelled_teams: final_ranking.append(expelled_teams)
+        
+    return final_ranking, overall_stats
+
+def calcular_ranking_individual_tv(db_ref, rk_arma, rk_gen):
+    esgrimistas_arma_gen = [es for es in db_ref.get("Esgrimistas", []) if es["arma"] == rk_arma and es["genero"] == rk_gen]
+    if not esgrimistas_arma_gen: return pd.DataFrame(), pd.DataFrame()
+    
+    ind_stats = {es["id_esgrimista"]: {"nombre": es["nombre"], "escuela": es["id_escuela"], "v": 0, "m_real": 0, "td": 0, "tr": 0} for es in esgrimistas_arma_gen}
+    
+    for p in db_ref.get("Poules_Ronda0", []):
+        if p["arma"] == rk_arma and p["genero"] == rk_gen:
+            esc_p_id = p["escuela"].replace(" ", "_").upper()
+            tiradores_p = [es for es in esgrimistas_arma_gen if es["id_escuela"] == esc_p_id and es.get("estado_competencia", "Activo") == "Activo"]
+            if len(tiradores_p) >= 3:
+                for b in p.get("bouts", []):
+                    ia, ib, ta, tb = b["t_idx_a"], b["t_idx_b"], b["toques_a"], b["toques_b"]
+                    id_a, id_b = tiradores_p[ia]["id_esgrimista"], tiradores_p[ib]["id_esgrimista"]
+                    ind_stats[id_a]["m_real"] += 1; ind_stats[id_a]["td"] += ta; ind_stats[id_a]["tr"] += tb
+                    if ta > tb: ind_stats[id_a]["v"] += 1
+                    ind_stats[id_b]["m_real"] += 1; ind_stats[id_b]["td"] += tb; ind_stats[id_b]["tr"] += ta
+                    if tb > ta: ind_stats[id_b]["v"] += 1
+
+    for b_entry in db_ref.get("Asaltos_Bouts", []):
+        enc_id = b_entry["id_encuentro"]
+        enc = next((e for e in db_ref.get("Encuentros_Equipos", []) if e["id_encuentro"] == enc_id), None)
+        if enc and enc["arma"] == rk_arma and enc["genero"] == rk_gen:
+            sust = b_entry.get("sustituciones", {})
+            map_1_3_ids = {str(i+1): eid for i, eid in enumerate(enc['alineacion_1_3'])}
+            map_4_6_ids = {str(i+4): eid for i, eid in enumerate(enc['alineacion_4_6'])}
+            res1 = next((es["id_esgrimista"] for es in esgrimistas_arma_gen if es["id_escuela"] == enc["id_escuela_1_3"] and es["nombre"] == enc.get("reserva_1_3")), None)
+            res2 = next((es["id_esgrimista"] for es in esgrimistas_arma_gen if es["id_escuela"] == enc["id_escuela_4_6"] and es["nombre"] == enc.get("reserva_4_6")), None)
+            
+            for b in b_entry.get("bouts", []):
+                m_num, cruce, ta, tb = b["asalto"], b["cruce"], b["toques_a"], b["toques_b"]
+                if "-" in cruce:
+                    n_a, n_b = cruce.split("-")
+                    id_a = res1 if (sust.get("eq1_activo") and n_a == sust.get("eq1_pos") and m_num >= int(sust.get("eq1_desde", 99)) and res1) else map_1_3_ids.get(n_a)
+                    id_b = res2 if (sust.get("eq2_activo") and n_b == sust.get("eq2_pos") and m_num >= int(sust.get("eq2_desde", 99)) and res2) else map_4_6_ids.get(n_b)
+                    
+                    if id_a and id_a in ind_stats:
+                        ind_stats[id_a]["m_real"] += 1; ind_stats[id_a]["td"] += ta; ind_stats[id_a]["tr"] += tb
                         if ta > tb: ind_stats[id_a]["v"] += 1
-                        ind_stats[id_b]["m"] += 1; ind_stats[id_b]["td"] += tb; ind_stats[id_b]["tr"] += ta
+                    if id_b and id_b in ind_stats:
+                        ind_stats[id_b]["m_real"] += 1; ind_stats[id_b]["td"] += tb; ind_stats[id_b]["tr"] += ta
                         if tb > ta: ind_stats[id_b]["v"] += 1
 
-        for b_entry in db.get("Asaltos_Bouts", []):
-            enc = next((e for e in db.get("Encuentros_Equipos", []) if e["id_encuentro"] == b_entry["id_encuentro"]), None)
-            if enc and enc["arma"] == rk_arma and enc["genero"] == rk_gen:
-                sust = b_entry.get("sustituciones", {})
-                m1 = {str(i+1): eid for i, eid in enumerate(enc['alineacion_1_3'])}
-                m2 = {str(i+4): eid for i, eid in enumerate(enc['alineacion_4_6'])}
-                r1 = next((es["id_esgrimista"] for es in esg_ag if es["id_escuela"] == enc["id_escuela_1_3"] and es["nombre"] == enc.get("reserva_1_3")), None)
-                r2 = next((es["id_esgrimista"] for es in esg_ag if es["id_escuela"] == enc["id_escuela_4_6"] and es["nombre"] == enc.get("reserva_4_6")), None)
-                for b in b_entry.get("bouts", []):
-                    m_num, cruce, ta, tb = b["asalto"], b["cruce"], b["toques_a"], b["toques_b"]
-                    if "-" in cruce:
-                        n_a, n_b = cruce.split("-")
-                        id_a = r1 if (sust.get("eq1_activo") and n_a == sust.get("eq1_pos") and m_num >= int(sust.get("eq1_desde", 99)) and r1) else m1.get(n_a)
-                        id_b = r2 if (sust.get("eq2_activo") and n_b == sust.get("eq2_pos") and m_num >= int(sust.get("eq2_desde", 99)) and r2) else m2.get(n_b)
-                        if id_a and id_a in ind_stats:
-                            ind_stats[id_a]["m"] += 1; ind_stats[id_a]["td"] += ta; ind_stats[id_a]["tr"] += tb
-                            if ta > tb: ind_stats[id_a]["v"] += 1
-                        if id_b and id_b in ind_stats:
-                            ind_stats[id_b]["m"] += 1; ind_stats[id_b]["td"] += tb; ind_stats[id_b]["tr"] += ta
-                            if tb > ta: ind_stats[id_b]["v"] += 1
-
-        tabla_indiv = [{"Atleta": s["nombre"], "V/M": round(s["v"]/s["m"], 3) if s["m"]>0 else 0, "TD": s["td"], "Índice": s["td"]-s["tr"]} for eid, s in ind_stats.items() if s["m"] > 0]
-        df_ind = pd.DataFrame(tabla_indiv)
-        
-        if not df_ind.empty:
-            df_ind = df_ind.sort_values(by=["V/M", "Índice", "TD"], ascending=False).reset_index(drop=True)
-            ganador_guardado = db.get("Desempates", {}).get(f"{rk_arma}_{rk_gen}")
-            if ganador_guardado:
-                df_ind["Prioridad"] = df_ind["Atleta"].apply(lambda x: 1 if x == ganador_guardado else 0)
-                df_ind = df_ind.sort_values(by=["Prioridad", "V/M", "Índice", "TD"], ascending=[False, False, False, False]).drop(columns=["Prioridad"]).reset_index(drop=True)
-            df_ind.index = df_ind.index + 1
+    enc_creados = {}
+    for enc in db_ref.get("Encuentros_Equipos", []):
+        if enc["arma"] == rk_arma and enc["genero"] == rk_gen:
+            e1, e2 = enc["id_escuela_1_3"], enc["id_escuela_4_6"]
+            enc_creados[e1] = enc_creados.get(e1, 0) + 1
+            enc_creados[e2] = enc_creados.get(e2, 0) + 1
             
-            # Inyectar Puntos CISM si la categoría está cerrada
-            if estado == "FINALIZADA":
-                def pts_indiv(pos):
-                    if pos == 1: return 10
-                    if pos == 2: return 7
-                    if pos == 3: return 5
-                    if pos == 4: return 4
-                    if pos == 5: return 3
-                    if pos == 6: return 2
-                    if 7 <= pos <= 15: return 1
-                    return 0
-                df_ind["Puntos CISM"] = [pts_indiv(i) for i in df_ind.index]
-            
-        return df_eq, df_ind
+    max_encuentros = max(enc_creados.values()) if enc_creados else 0
+    m_maximo_global = 2 + (max_encuentros * 3)
 
-    df_equipos, df_individual = calcular_tablas_tv(arma, gen, db, estado_cat)
+    tabla_gran_poule = []
+    for id_esg, st_esg in ind_stats.items():
+        if st_esg["m_real"] > 0:
+            v_m_global = round(st_esg["v"] / m_maximo_global, 4) if m_maximo_global > 0 else 0.0
+            ind_esg = st_esg["td"] - st_esg["tr"]
+            tabla_gran_poule.append({
+                "Atleta": st_esg["nombre"], "Escuela": st_esg["escuela"].replace("_", " "),
+                "V/M": v_m_global, "Ind": ind_esg, "TD": st_esg["td"]
+            })
+            
+    df_gran_poule = pd.DataFrame(tabla_gran_poule)
+    if df_gran_poule.empty: return pd.DataFrame(), pd.DataFrame()
     
-    col_eq, col_ind = st.columns(2)
-    with col_eq:
-        st.markdown("#### 🛡️ Poule de Equipos")
-        if not df_equipos.empty: st.dataframe(df_equipos, use_container_width=True)
-        else: st.info("Esperando resultados de pista.")
+    df_gran_poule = df_gran_poule.sort_values(by=["V/M", "Ind", "TD"], ascending=False).reset_index(drop=True)
+    
+    ganador_guardado = db_ref.get("Desempates", {}).get(f"{rk_arma}_{rk_gen}")
+    if ganador_guardado:
+        df_gran_poule["Prioridad_Oro"] = df_gran_poule["Atleta"].apply(lambda x: 1 if x == ganador_guardado else 0)
+        df_gran_poule = df_gran_poule.sort_values(by=["Prioridad_Oro", "V/M", "Ind", "TD"], ascending=[False, False, False, False]).drop(columns=["Prioridad_Oro"]).reset_index(drop=True)
         
-    with col_ind:
-        st.markdown("#### 🤺 Gran Poule Individual")
-        if not df_individual.empty: st.dataframe(df_individual, use_container_width=True)
-        else: st.info("Esperando resultados de pista.")
+    df_gran_poule["Posición"] = df_gran_poule[["V/M", "Ind", "TD"]].apply(tuple, axis=1).rank(method='min', ascending=False).astype(int)
+    if ganador_guardado and len(df_gran_poule) > 1 and df_gran_poule.iloc[0]["Atleta"] == ganador_guardado:
+        df_gran_poule.at[0, "Posición"] = 1
+        df_gran_poule.at[1, "Posición"] = 2
+        
+    activos, expulsados = [], []
+    for _, row in df_gran_poule.iterrows():
+        est = next((e["estado_competencia"] for e in db_ref["Esgrimistas"] if e["nombre"] == row["Atleta"]), "Activo")
+        if est == "Expulsado":
+            row["V/M"] = "EXCLUIDO"
+            row["Posición"] = "-"
+            expulsados.append(row)
+        else:
+            activos.append(row)
+            
+    df_a = pd.DataFrame(activos)
+    if not df_a.empty: df_a = df_a.set_index("Posición")
+    df_e = pd.DataFrame(expulsados)
+    if not df_e.empty: df_e = df_e.set_index("Posición")
+    
+    return df_a, df_e
 
-# Inserción del pie de página inamovible al final del ciclo
-st.markdown("<div class='footer-text'>Sistema de Gestión CISM Chile v4.6, diseñado por el maestro José De Sousa</div>", unsafe_allow_html=True)
+# --- RENDERIZADO ROTATORIO DE TV ---
+if not db.get("Configuracion_Torneo"):
+    st.markdown("<h1>INTERESCUELAS MATRICES CISM 2026</h1>", unsafe_allow_html=True)
+    st.markdown("<h2>Esperando configuración desde la Mesa de Control...</h2>", unsafe_allow_html=True)
+else:
+    nom_t = db["Configuracion_Torneo"][0].get("nombre_torneo", "Torneo CISM")
+    st.markdown(f"<h1>{nom_t}</h1>", unsafe_allow_html=True)
+    
+    # Motor de rotación
+    categorias = [("Espada", "Masculino"), ("Espada", "Femenino"), 
+                  ("Florete", "Masculino"), ("Florete", "Femenino"), 
+                  ("Sable", "Masculino"), ("Sable", "Femenino")]
+    
+    if 'tv_idx' not in st.session_state:
+        st.session_state.tv_idx = 0
+        
+    cat_actual = categorias[st.session_state.tv_idx]
+    arma_act, gen_act = cat_actual
+    
+    st.markdown(f"<h2>Resultados en Vivo: {arma_act.upper()} {gen_act.upper()}</h2>", unsafe_allow_html=True)
+    
+    llave_estado = f"{arma_act}_{gen_act}"
+    estado_actual = db.get("Estado_Categorias", {}).get(llave_estado, "EN CURSO")
+    
+    if estado_actual == "FINALIZADA":
+        st.markdown('<div class="estado-box finalizada">🔴 CATEGORÍA FINALIZADA OFICIALMENTE</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="estado-box en-curso">🟢 COMPETENCIA EN CURSO (Resultados Parciales)</div>', unsafe_allow_html=True)
+    
+    col_izq, col_der = st.columns(2)
+    
+    # --- RENDER EQUIPOS ---
+    with col_izq:
+        st.subheader("🛡️ Clasificación Equipos")
+        ranking_groups, eq_stats = calcular_ranking_equipos_tv(db, arma_act, gen_act)
+        
+        if ranking_groups:
+            llave_des_eq = f"{arma_act}_{gen_act}"
+            ganador_eq = db.get("Desempates_Equipos", {}).get(llave_des_eq)
+            if ganador_eq and len(ranking_groups[0]) > 1 and ganador_eq in ranking_groups[0]:
+                perdedores = [e for e in ranking_groups[0] if e != ganador_eq]
+                ranking_groups[0] = [ganador_eq] + perdedores
+                
+            flat_ranking = []
+            for g in ranking_groups: flat_ranking.extend(g)
+            
+            tabla_eq = []
+            for eq in flat_ranking:
+                s_eq = eq_stats[eq]
+                if s_eq["expulsado"]:
+                    tabla_eq.append({"Escuela": eq.replace("_", " "), "V": "EXPULSADO", "Ind": "-"})
+                else:
+                    tabla_eq.append({"Escuela": eq.replace("_", " "), "V": s_eq["pg"], "Ind": s_eq["ind"]})
+            
+            df_eq = pd.DataFrame(tabla_eq)
+            df_eq.index = range(1, len(df_eq) + 1)
+            st.dataframe(df_eq, use_container_width=True)
+        else:
+            st.write("Aún no hay combates registrados.")
 
-# Avanzar el carrusel para el próximo ciclo y esperar
-st.session_state.tv_index += 1
-time.sleep(15)
-st.rerun()
+    # --- RENDER INDIVIDUAL ---
+    with col_der:
+        st.subheader("🤺 Gran Poule Individual")
+        df_activos, df_expulsados = calcular_ranking_individual_tv(db, arma_act, gen_act)
+        
+        if not df_activos.empty:
+            df_mostrar = df_activos[["Atleta", "Escuela", "V/M", "Ind"]]
+            st.dataframe(df_mostrar, use_container_width=True)
+            
+        if not df_expulsados.empty:
+            st.markdown("<p style='color:#c0392b; font-weight:bold;'>Sancionados (Fuera de Ranking):</p>", unsafe_allow_html=True)
+            df_exp = df_expulsados[["Atleta", "Escuela", "V/M"]]
+            st.dataframe(df_exp, use_container_width=True)
+            
+        if df_activos.empty and df_expulsados.empty:
+            st.write("Aún no hay asaltos registrados.")
+
+    # Temporizador para rotar la categoría y actualizar
+    time.sleep(12) # Cambia de pantalla cada 12 segundos
+    st.session_state.tv_idx = (st.session_state.tv_idx + 1) % len(categorias)
+    st.rerun()
