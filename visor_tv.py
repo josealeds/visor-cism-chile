@@ -79,10 +79,18 @@ def calcular_ranking_equipos_tv(db_ref, arma, genero):
                     bw1 = sum(1 for b in bouts_entry.get("bouts", []) if int(b.get("toques_a", 0)) > int(b.get("toques_b", 0)))
                     bw2 = sum(1 for b in bouts_entry.get("bouts", []) if int(b.get("toques_b", 0)) > int(b.get("toques_a", 0)))
                     
-                    if td1 > td2:
+                    # REGLA FUNDAMENTAL CORREGIDA: Gana el encuentro quien tenga más victorias individuales (bw).
+                    if bw1 > bw2:
                         match_results[eq1][eq2], match_results[eq2][eq1] = eq1, eq1
-                    elif td2 > td1:
+                    elif bw2 > bw1:
                         match_results[eq1][eq2], match_results[eq2][eq1] = eq2, eq2
+                    else:
+                        if td1 > td2:
+                            match_results[eq1][eq2], match_results[eq2][eq1] = eq1, eq1
+                        elif td2 > td1:
+                            match_results[eq1][eq2], match_results[eq2][eq1] = eq2, eq2
+                        else:
+                            match_results[eq1][eq2] = None
                         
                     bouts_won[eq1][eq2], bouts_won[eq2][eq1] = int(bw1), int(bw2)
                     td_dict[eq1][eq2], td_dict[eq2][eq1] = int(td1), int(td2)
@@ -96,7 +104,6 @@ def calcular_ranking_equipos_tv(db_ref, arma, genero):
             overall_stats[t1]['bw'] += int(bouts_won.get(t1, {}).get(t2, 0))
             overall_stats[t1]['td'] += int(td_dict.get(t1, {}).get(t2, 0))
             overall_stats[t1]['tr'] += int(tr_dict.get(t1, {}).get(t2, 0))
-        # Sanitización estricta 
         overall_stats[t1]['ind'] = int(overall_stats[t1]['td']) - int(overall_stats[t1]['tr'])
 
     active_teams = [t for t in teams if not overall_stats[t]['expulsado']]
@@ -113,22 +120,26 @@ def calcular_ranking_equipos_tv(db_ref, arma, genero):
     def resolve_tie(tied_group):
         if len(tied_group) <= 1: return [tied_group]
         
-        # REGLA 1: Encuentro(s) directo(s) entre las escuelas empatadas
         internal_pg = {t: sum(1 for t2 in tied_group if t!=t2 and match_results.get(t, {}).get(t2) == t) for t in tied_group}
         groups = group_by_metric(tied_group, internal_pg)
         if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
         
-        # REGLA 2: Mayor número de victorias de combates individuales de TODAS LAS PRUEBAS
+        internal_bw = {t: sum(int(bouts_won.get(t, {}).get(t2, 0)) for t2 in tied_group if t!=t2) for t in tied_group}
+        groups = group_by_metric(tied_group, internal_bw)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
+        internal_ind = {t: sum(int(td_dict.get(t, {}).get(t2, 0)) - int(tr_dict.get(t, {}).get(t2, 0)) for t2 in tied_group if t!=t2) for t in tied_group}
+        groups = group_by_metric(tied_group, internal_ind)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
         overall_bw_metric = {t: int(overall_stats[t]['bw']) for t in tied_group}
         groups = group_by_metric(tied_group, overall_bw_metric)
         if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
         
-        # REGLA 3: Mayor índice o coeficiente (TD-TR) de TODA LA PRUEBA
         overall_ind_metric = {t: int(overall_stats[t]['ind']) for t in tied_group}
         groups = group_by_metric(tied_group, overall_ind_metric)
         if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
         
-        # REGLA 4: Mayor número de tocados dados (TD) durante TODA LA PRUEBA
         overall_td_metric = {t: int(overall_stats[t]['td']) for t in tied_group}
         groups = group_by_metric(tied_group, overall_td_metric)
         if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
@@ -140,7 +151,6 @@ def calcular_ranking_equipos_tv(db_ref, arma, genero):
     for g in initial_groups:
         final_ranking.extend(resolve_tie(g))
         
-    # Anexar equipos expulsados al final
     if expelled_teams:
         final_ranking.append(expelled_teams)
         
