@@ -32,54 +32,72 @@ db = cargar_db()
 def calcular_ranking_equipos_tv(db_ref, arma, genero):
     teams = set()
     for e in db_ref.get("Encuentros_Equipos", []):
-        if e["arma"] == arma and e["genero"] == genero:
-            teams.add(e["id_escuela_1_3"])
-            teams.add(e["id_escuela_4_6"])
+        if e.get("arma") == arma and e.get("genero") == genero:
+            teams.add(e.get("id_escuela_1_3"))
+            teams.add(e.get("id_escuela_4_6"))
     teams = list(teams)
     
-    match_results, bouts_won, td_dict, tr_dict = {t: {} for t in teams}, {t: {} for t in teams}, {t: {} for t in teams}, {t: {} for t in teams}
+    match_results = {t: {} for t in teams}
+    bouts_won = {t: {} for t in teams}
+    td_dict = {t: {} for t in teams}
+    tr_dict = {t: {} for t in teams}
+    
     equipos_expulsados = db_ref.get("Equipos_Expulsados", [])
     
     for e in db_ref.get("Encuentros_Equipos", []):
-        if e["arma"] == arma and e["genero"] == genero:
-            eq1, eq2, eid = e["id_escuela_1_3"], e["id_escuela_4_6"], e["id_encuentro"]
-            is_eq1_exp, is_eq2_exp = f"{eq1}_{arma}_{genero}" in equipos_expulsados, f"{eq2}_{arma}_{genero}" in equipos_expulsados
-            bouts_entry = next((b for b in db_ref.get("Asaltos_Bouts", []) if b["id_encuentro"] == eid), None)
+        if e.get("arma") == arma and e.get("genero") == genero:
+            eq1 = e.get("id_escuela_1_3")
+            eq2 = e.get("id_escuela_4_6")
+            eid = str(e.get("id_encuentro"))
+            
+            is_eq1_exp = f"{eq1}_{arma}_{genero}" in equipos_expulsados
+            is_eq2_exp = f"{eq2}_{arma}_{genero}" in equipos_expulsados
+            
+            bouts_entry = next((b for b in db_ref.get("Asaltos_Bouts", []) if str(b.get("id_encuentro")) == eid), None)
             
             if is_eq1_exp and not is_eq2_exp:
                 match_results[eq1][eq2] = eq2
                 match_results[eq2][eq1] = eq2
-                bouts_won[eq1][eq2], bouts_won[eq2][eq1], td_dict[eq1][eq2], td_dict[eq2][eq1], tr_dict[eq1][eq2], tr_dict[eq2][eq1] = 0, 9, 0, 45, 45, 0
+                bouts_won[eq1][eq2], bouts_won[eq2][eq1] = 0, 9
+                td_dict[eq1][eq2], td_dict[eq2][eq1] = 0, 45
+                tr_dict[eq1][eq2], tr_dict[eq2][eq1] = 45, 0
             elif is_eq2_exp and not is_eq1_exp:
                 match_results[eq1][eq2] = eq1
                 match_results[eq2][eq1] = eq1
-                bouts_won[eq1][eq2], bouts_won[eq2][eq1], td_dict[eq1][eq2], td_dict[eq2][eq1], tr_dict[eq1][eq2], tr_dict[eq2][eq1] = 9, 0, 45, 0, 0, 45
+                bouts_won[eq1][eq2], bouts_won[eq2][eq1] = 9, 0
+                td_dict[eq1][eq2], td_dict[eq2][eq1] = 45, 0
+                tr_dict[eq1][eq2], tr_dict[eq2][eq1] = 0, 45
             elif is_eq1_exp and is_eq2_exp:
                 match_results[eq1][eq2] = None
-                bouts_won[eq1][eq2], bouts_won[eq2][eq1], td_dict[eq1][eq2], td_dict[eq2][eq1], tr_dict[eq1][eq2], tr_dict[eq2][eq1] = 0, 0, 0, 0, 0, 0
+                bouts_won[eq1][eq2], bouts_won[eq2][eq1] = 0, 0
+                td_dict[eq1][eq2], td_dict[eq2][eq1] = 0, 0
+                tr_dict[eq1][eq2], tr_dict[eq2][eq1] = 0, 0
             else:
                 if bouts_entry and len(bouts_entry.get("bouts", [])) > 0:
-                    td1 = sum(b["toques_a"] for b in bouts_entry["bouts"])
-                    td2 = sum(b["toques_b"] for b in bouts_entry["bouts"])
-                    bw1 = sum(1 for b in bouts_entry["bouts"] if b["toques_a"] > b["toques_b"])
-                    bw2 = sum(1 for b in bouts_entry["bouts"] if b["toques_b"] > b["toques_a"])
+                    td1 = sum(int(b.get("toques_a", 0)) for b in bouts_entry.get("bouts", []))
+                    td2 = sum(int(b.get("toques_b", 0)) for b in bouts_entry.get("bouts", []))
+                    bw1 = sum(1 for b in bouts_entry.get("bouts", []) if int(b.get("toques_a", 0)) > int(b.get("toques_b", 0)))
+                    bw2 = sum(1 for b in bouts_entry.get("bouts", []) if int(b.get("toques_b", 0)) > int(b.get("toques_a", 0)))
                     
-                    if td1 > td2: 
+                    if td1 > td2:
                         match_results[eq1][eq2], match_results[eq2][eq1] = eq1, eq1
-                    elif td2 > td1: 
+                    elif td2 > td1:
                         match_results[eq1][eq2], match_results[eq2][eq1] = eq2, eq2
                         
-                    bouts_won[eq1][eq2], bouts_won[eq2][eq1], td_dict[eq1][eq2], td_dict[eq2][eq1], tr_dict[eq1][eq2], tr_dict[eq2][eq1] = bw1, bw2, td1, td2, td2, td1
+                    bouts_won[eq1][eq2], bouts_won[eq2][eq1] = int(bw1), int(bw2)
+                    td_dict[eq1][eq2], td_dict[eq2][eq1] = int(td1), int(td2)
+                    tr_dict[eq1][eq2], tr_dict[eq2][eq1] = int(td2), int(td1)
 
     overall_stats = {t: {'pg': 0, 'bw': 0, 'td': 0, 'tr': 0, 'ind': 0, 'expulsado': f"{t}_{arma}_{genero}" in equipos_expulsados} for t in teams}
     for t1 in teams:
         for t2 in teams:
             if t1 == t2: continue
             if match_results.get(t1, {}).get(t2) == t1: overall_stats[t1]['pg'] += 1
-            overall_stats[t1]['bw'] += bouts_won.get(t1, {}).get(t2, 0)
-            overall_stats[t1]['td'] += td_dict.get(t1, {}).get(t2, 0)
-            overall_stats[t1]['tr'] += tr_dict.get(t1, {}).get(t2, 0)
-        overall_stats[t1]['ind'] = overall_stats[t1]['td'] - overall_stats[t1]['tr']
+            overall_stats[t1]['bw'] += int(bouts_won.get(t1, {}).get(t2, 0))
+            overall_stats[t1]['td'] += int(td_dict.get(t1, {}).get(t2, 0))
+            overall_stats[t1]['tr'] += int(tr_dict.get(t1, {}).get(t2, 0))
+        # Sanitización estricta 
+        overall_stats[t1]['ind'] = int(overall_stats[t1]['td']) - int(overall_stats[t1]['tr'])
 
     active_teams = [t for t in teams if not overall_stats[t]['expulsado']]
     expelled_teams = [t for t in teams if overall_stats[t]['expulsado']]
@@ -94,22 +112,37 @@ def calcular_ranking_equipos_tv(db_ref, arma, genero):
 
     def resolve_tie(tied_group):
         if len(tied_group) <= 1: return [tied_group]
-        for metric in [
-            {t: sum(1 for t2 in tied_group if t!=t2 and match_results.get(t, {}).get(t2) == t) for t in tied_group},
-            {t: sum(bouts_won.get(t, {}).get(t2, 0) for t2 in tied_group if t!=t2) for t in tied_group},
-            {t: sum(td_dict.get(t, {}).get(t2, 0) - tr_dict.get(t, {}).get(t2, 0) for t2 in tied_group if t!=t2) for t in tied_group},
-            {t: overall_stats[t]['bw'] for t in tied_group}, 
-            {t: overall_stats[t]['ind'] for t in tied_group}, 
-            {t: overall_stats[t]['td'] for t in tied_group}
-        ]:
-            groups = group_by_metric(tied_group, metric)
-            if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
+        # REGLA 1: Encuentro(s) directo(s) entre las escuelas empatadas
+        internal_pg = {t: sum(1 for t2 in tied_group if t!=t2 and match_results.get(t, {}).get(t2) == t) for t in tied_group}
+        groups = group_by_metric(tied_group, internal_pg)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
+        # REGLA 2: Mayor número de victorias de combates individuales de TODAS LAS PRUEBAS
+        overall_bw_metric = {t: int(overall_stats[t]['bw']) for t in tied_group}
+        groups = group_by_metric(tied_group, overall_bw_metric)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
+        # REGLA 3: Mayor índice o coeficiente (TD-TR) de TODA LA PRUEBA
+        overall_ind_metric = {t: int(overall_stats[t]['ind']) for t in tied_group}
+        groups = group_by_metric(tied_group, overall_ind_metric)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
+        # REGLA 4: Mayor número de tocados dados (TD) durante TODA LA PRUEBA
+        overall_td_metric = {t: int(overall_stats[t]['td']) for t in tied_group}
+        groups = group_by_metric(tied_group, overall_td_metric)
+        if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
+        
         return [tied_group]
         
     initial_groups = group_by_metric(active_teams, {t: overall_stats[t]['pg'] for t in active_teams})
     final_ranking = []
-    for g in initial_groups: final_ranking.extend(resolve_tie(g))
-    if expelled_teams: final_ranking.append(expelled_teams)
+    for g in initial_groups:
+        final_ranking.extend(resolve_tie(g))
+        
+    # Anexar equipos expulsados al final
+    if expelled_teams:
+        final_ranking.append(expelled_teams)
         
     return final_ranking, overall_stats
 
