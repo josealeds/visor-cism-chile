@@ -550,7 +550,6 @@ else:
             
         if df_activos.empty and df_expulsados.empty:
             st.write("Aún no hay asaltos registrados.")
-
     st.markdown("---")
     st.markdown("<h3 style='text-align: center;'>🛡️ Matriz de Encuentros Directos (Equipos)</h3>", unsafe_allow_html=True)
     df_matriz_eq_tv = generar_matriz_equipos_tv(db, arma_act, gen_act)
@@ -559,7 +558,8 @@ else:
         st.dataframe(df_matriz_eq_tv.style.map(estilo_matriz, subset=columnas_estilo_eq), use_container_width=True)
     else:
         st.info("Esperando resultados de equipos...")
-    st.markdown("<h3 style='text-align: center;'>📊 Matriz de Cruzamientos (Gran Poule)</h3>", unsafe_allow_html=True)
+
+    st.markdown("<h3 style='text-align: center;'>📊 Matriz de Cruzamientos (Gran Poule Individual)</h3>", unsafe_allow_html=True)
     df_matriz = generar_matriz_poule(db, arma_act, gen_act)
     if df_matriz is not None:
         columnas_estilo = [str(i) for i in range(1, len(df_matriz)+1)]
