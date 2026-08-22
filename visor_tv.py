@@ -33,7 +33,8 @@ def calcular_ranking_equipos_tv(db_ref, arma, genero):
     teams = set()
     for e in db_ref.get("Encuentros_Equipos", []):
         if e["arma"] == arma and e["genero"] == genero:
-            teams.add(e["id_escuela_1_3"]); teams.add(e["id_escuela_4_6"])
+            teams.add(e["id_escuela_1_3"])
+            teams.add(e["id_escuela_4_6"])
     teams = list(teams)
     
     match_results, bouts_won, td_dict, tr_dict = {t: {} for t in teams}, {t: {} for t in teams}, {t: {} for t in teams}, {t: {} for t in teams}
@@ -46,10 +47,12 @@ def calcular_ranking_equipos_tv(db_ref, arma, genero):
             bouts_entry = next((b for b in db_ref.get("Asaltos_Bouts", []) if b["id_encuentro"] == eid), None)
             
             if is_eq1_exp and not is_eq2_exp:
-                match_results[eq1][eq2] = eq2; match_results[eq2][eq1] = eq2
+                match_results[eq1][eq2] = eq2
+                match_results[eq2][eq1] = eq2
                 bouts_won[eq1][eq2], bouts_won[eq2][eq1], td_dict[eq1][eq2], td_dict[eq2][eq1], tr_dict[eq1][eq2], tr_dict[eq2][eq1] = 0, 9, 0, 45, 45, 0
             elif is_eq2_exp and not is_eq1_exp:
-                match_results[eq1][eq2] = eq1; match_results[eq2][eq1] = eq1
+                match_results[eq1][eq2] = eq1
+                match_results[eq2][eq1] = eq1
                 bouts_won[eq1][eq2], bouts_won[eq2][eq1], td_dict[eq1][eq2], td_dict[eq2][eq1], tr_dict[eq1][eq2], tr_dict[eq2][eq1] = 9, 0, 45, 0, 0, 45
             elif is_eq1_exp and is_eq2_exp:
                 match_results[eq1][eq2] = None
@@ -61,8 +64,10 @@ def calcular_ranking_equipos_tv(db_ref, arma, genero):
                     bw1 = sum(1 for b in bouts_entry["bouts"] if b["toques_a"] > b["toques_b"])
                     bw2 = sum(1 for b in bouts_entry["bouts"] if b["toques_b"] > b["toques_a"])
                     
-                    if td1 > td2: match_results[eq1][eq2], match_results[eq2][eq1] = eq1, eq1
-                    elif td2 > td1: match_results[eq1][eq2], match_results[eq2][eq1] = eq2, eq2
+                    if td1 > td2: 
+                        match_results[eq1][eq2], match_results[eq2][eq1] = eq1, eq1
+                    elif td2 > td1: 
+                        match_results[eq1][eq2], match_results[eq2][eq1] = eq2, eq2
                         
                     bouts_won[eq1][eq2], bouts_won[eq2][eq1], td_dict[eq1][eq2], td_dict[eq2][eq1], tr_dict[eq1][eq2], tr_dict[eq2][eq1] = bw1, bw2, td1, td2, td2, td1
 
@@ -93,7 +98,9 @@ def calcular_ranking_equipos_tv(db_ref, arma, genero):
             {t: sum(1 for t2 in tied_group if t!=t2 and match_results.get(t, {}).get(t2) == t) for t in tied_group},
             {t: sum(bouts_won.get(t, {}).get(t2, 0) for t2 in tied_group if t!=t2) for t in tied_group},
             {t: sum(td_dict.get(t, {}).get(t2, 0) - tr_dict.get(t, {}).get(t2, 0) for t2 in tied_group if t!=t2) for t in tied_group},
-            {t: overall_stats[t]['bw'] for t in tied_group}, {t: overall_stats[t]['ind'] for t in tied_group}, {t: overall_stats[t]['td'] for t in tied_group}
+            {t: overall_stats[t]['bw'] for t in tied_group}, 
+            {t: overall_stats[t]['ind'] for t in tied_group}, 
+            {t: overall_stats[t]['td'] for t in tied_group}
         ]:
             groups = group_by_metric(tied_group, metric)
             if len(groups) > 1: return [res for g in groups for res in resolve_tie(g)]
@@ -174,13 +181,19 @@ def calcular_ranking_individual_tv(db_ref, rk_arma, rk_gen):
     df_gran_poule = df_gran_poule.sort_values(by=["V/M", "Ind", "TD"], ascending=False).reset_index(drop=True)
     
     ganador_guardado = db_ref.get("Desempates", {}).get(f"{rk_arma}_{rk_gen}")
-    if ganador_guardado:
+    
+    # PARCHE V4.7 PARA VISOR: Solo aplicar prioridad de Oro si hay empate real en la cima
+    empate_real_cima = len(df_gran_poule) > 1 and (df_gran_poule.iloc[0]["V/M"] == df_gran_poule.iloc[1]["V/M"])
+    
+    if ganador_guardado and empate_real_cima and ganador_guardado in [df_gran_poule.iloc[0]["Atleta"], df_gran_poule.iloc[1]["Atleta"]]:
         df_gran_poule["Prioridad_Oro"] = df_gran_poule["Atleta"].apply(lambda x: 1 if x == ganador_guardado else 0)
         df_gran_poule = df_gran_poule.sort_values(by=["Prioridad_Oro", "V/M", "Ind", "TD"], ascending=[False, False, False, False]).drop(columns=["Prioridad_Oro"]).reset_index(drop=True)
         
     df_gran_poule["Posición"] = df_gran_poule[["V/M", "Ind", "TD"]].apply(tuple, axis=1).rank(method='min', ascending=False).astype(int)
-    if ganador_guardado and len(df_gran_poule) > 1 and df_gran_poule.iloc[0]["Atleta"] == ganador_guardado:
-        df_gran_poule.at[0, "Posición"] = 1; df_gran_poule.at[1, "Posición"] = 2
+    
+    if ganador_guardado and empate_real_cima and len(df_gran_poule) > 1 and df_gran_poule.iloc[0]["Atleta"] == ganador_guardado:
+        df_gran_poule.at[0, "Posición"] = 1
+        df_gran_poule.at[1, "Posición"] = 2
         
     activos, expulsados = [], []
     for _, row in df_gran_poule.iterrows():
@@ -188,7 +201,8 @@ def calcular_ranking_individual_tv(db_ref, rk_arma, rk_gen):
         if est == "Expulsado":
             row["V/M"], row["Posición"] = "EXCLUIDO", "-"
             expulsados.append(row)
-        else: activos.append(row)
+        else: 
+            activos.append(row)
             
     df_a = pd.DataFrame(activos)
     if not df_a.empty: df_a = df_a.set_index("Posición")
