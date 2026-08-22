@@ -350,6 +350,104 @@ def generar_matriz_poule(db_ref, arma, genero):
     df.insert(0, "Tirador", nombres_disp)
     return df
 
+# --- GENERADOR DE MATRIZ DE EQUIPOS TV ---
+def generar_matriz_equipos_tv(db_ref, arma, genero):
+    ranking_groups, overall_stats = calcular_ranking_equipos_tv(db_ref, arma, genero)
+    
+    equipos_ordenados = []
+    for g in ranking_groups:
+        equipos_ordenados.extend(g)
+        
+    if not equipos_ordenados: return None
+    
+    match_results = {t: {} for t in equipos_ordenados}
+    bouts_won = {t: {} for t in equipos_ordenados}
+    td_dict = {t: {} for t in equipos_ordenados}
+    equipos_expulsados = db_ref.get("Equipos_Expulsados", [])
+    
+    for e in db_ref.get("Encuentros_Equipos", []):
+        if e.get("arma") == arma and e.get("genero") == genero:
+            eq1, eq2, eid = str(e.get("id_escuela_1_3")), str(e.get("id_escuela_4_6")), str(e.get("id_encuentro"))
+            if eq1 not in equipos_ordenados or eq2 not in equipos_ordenados: continue
+            
+            is_eq1_exp = f"{eq1}_{arma}_{genero}" in equipos_expulsados
+            is_eq2_exp = f"{eq2}_{arma}_{genero}" in equipos_expulsados
+            bouts_entry = next((b for b in db_ref.get("Asaltos_Bouts", []) if str(b.get("id_encuentro")) == eid), None)
+            
+            if is_eq1_exp and not is_eq2_exp:
+                match_results[eq1][eq2] = eq2; match_results[eq2][eq1] = eq2
+                bouts_won[eq1][eq2], bouts_won[eq2][eq1] = 0, 9
+                td_dict[eq1][eq2], td_dict[eq2][eq1] = 0, 45
+            elif is_eq2_exp and not is_eq1_exp:
+                match_results[eq1][eq2] = eq1; match_results[eq2][eq1] = eq1
+                bouts_won[eq1][eq2], bouts_won[eq2][eq1] = 9, 0
+                td_dict[eq1][eq2], td_dict[eq2][eq1] = 45, 0
+            elif is_eq1_exp and is_eq2_exp:
+                pass
+            else:
+                if bouts_entry and len(bouts_entry.get("bouts", [])) > 0:
+                    td1 = sum(int(b.get("toques_a", 0)) for b in bouts_entry.get("bouts", []))
+                    td2 = sum(int(b.get("toques_b", 0)) for b in bouts_entry.get("bouts", []))
+                    bw1 = sum(1 for b in bouts_entry.get("bouts", []) if int(b.get("toques_a", 0)) > int(b.get("toques_b", 0)))
+                    bw2 = sum(1 for b in bouts_entry.get("bouts", []) if int(b.get("toques_b", 0)) > int(b.get("toques_a", 0)))
+                    
+                    if bw1 > bw2: match_results[eq1][eq2], match_results[eq2][eq1] = eq1, eq1
+                    elif bw2 > bw1: match_results[eq1][eq2], match_results[eq2][eq1] = eq2, eq2
+                    else:
+                        if td1 > td2: match_results[eq1][eq2], match_results[eq2][eq1] = eq1, eq1
+                        elif td2 > td1: match_results[eq1][eq2], match_results[eq2][eq1] = eq2, eq2
+                        
+                    bouts_won[eq1][eq2], bouts_won[eq2][eq1] = bw1, bw2
+                    td_dict[eq1][eq2], td_dict[eq2][eq1] = td1, td2
+
+    def obtener_abreviatura(escuela):
+        esc_upper = str(escuela).upper()
+        if "MILITAR" in esc_upper: return "ESMIL"
+        if "PDI" in esc_upper or "ESCIPOL" in esc_upper: return "ESCIPOL"
+        if "CARABINEROS" in esc_upper: return "ESCAR"
+        if "NAVAL" in esc_upper: return "NAVAL"
+        if "AVIACION" in esc_upper or "AVIACIÓN" in esc_upper: return "AVIACION"
+        return esc_upper[:5]
+
+    n = len(equipos_ordenados)
+    cols = [str(i) for i in range(1, n+1)] + ["PG", "Asaltos", "TD", "TR", "Ind"]
+    df = pd.DataFrame(index=range(1, n+1), columns=cols)
+    
+    nombres_disp = []
+    for i, eq_a in enumerate(equipos_ordenados):
+        row_idx = i + 1
+        abrev_a = obtener_abreviatura(eq_a)
+        nombres_disp.append(f"{row_idx}. {abrev_a}")
+        s = overall_stats[eq_a]
+        
+        if s["expulsado"]:
+            df.at[row_idx, "PG"], df.at[row_idx, "Asaltos"], df.at[row_idx, "TD"], df.at[row_idx, "TR"], df.at[row_idx, "Ind"] = "EXP", "EXP", "-", "-", "-"
+        else:
+            df.at[row_idx, "PG"] = s["pg"]
+            df.at[row_idx, "Asaltos"] = s["bw"]
+            df.at[row_idx, "TD"] = s["td"]
+            df.at[row_idx, "TR"] = s["tr"]
+            df.at[row_idx, "Ind"] = f"+{s['ind']}" if s['ind'] > 0 else str(s['ind'])
+            
+        for j, eq_b in enumerate(equipos_ordenados):
+            col_idx = str(j + 1)
+            if i == j:
+                df.at[row_idx, col_idx] = "X"
+            else:
+                ganador = match_results.get(eq_a, {}).get(eq_b)
+                if ganador is not None:
+                    bw_a = bouts_won.get(eq_a, {}).get(eq_b, 0)
+                    td_a = td_dict.get(eq_a, {}).get(eq_b, 0)
+                    if ganador == eq_a:
+                        df.at[row_idx, col_idx] = f"V{bw_a} ({td_a}t)"
+                    else:
+                        df.at[row_idx, col_idx] = f"D{bw_a} ({td_a}t)"
+                else:
+                    df.at[row_idx, col_idx] = ""
+                    
+    df.insert(0, "Escuela", nombres_disp)
+    return df
+    
 def estilo_matriz(val):
     if isinstance(val, str):
         if val == "X": return "background-color: #2c3e50; color: #2c3e50;"
@@ -454,6 +552,13 @@ else:
             st.write("Aún no hay asaltos registrados.")
 
     st.markdown("---")
+    st.markdown("<h3 style='text-align: center;'>🛡️ Matriz de Encuentros Directos (Equipos)</h3>", unsafe_allow_html=True)
+    df_matriz_eq_tv = generar_matriz_equipos_tv(db, arma_act, gen_act)
+    if df_matriz_eq_tv is not None:
+        columnas_estilo_eq = [str(i) for i in range(1, len(df_matriz_eq_tv)+1)]
+        st.dataframe(df_matriz_eq_tv.style.map(estilo_matriz, subset=columnas_estilo_eq), use_container_width=True)
+    else:
+        st.info("Esperando resultados de equipos...")
     st.markdown("<h3 style='text-align: center;'>📊 Matriz de Cruzamientos (Gran Poule)</h3>", unsafe_allow_html=True)
     df_matriz = generar_matriz_poule(db, arma_act, gen_act)
     if df_matriz is not None:
