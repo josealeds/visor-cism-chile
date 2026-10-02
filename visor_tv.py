@@ -5,8 +5,17 @@ import time
 
 st.set_page_config(page_title="Visor TV - CISM", layout="wide", initial_sidebar_state="collapsed")
 
-DB_URL = "https://torneo-cism-default-rtdb.firebaseio.com/torneo_db.json"
+# --- CONEXIÓN SEGURA A FIREBASE (SECRETS) ---
+try:
+    raw_url = str(st.secrets["firebase"]["url"]).strip().rstrip("/")
+    if raw_url.endswith(".json"):
+        raw_url = raw_url[:-5]
+    DB_ROOT_URL = f"{raw_url}/.json"
+except (KeyError, FileNotFoundError):
+    st.error("⚠️ Error crítico: No se encontró la configuración de base de datos en st.secrets.")
+    st.stop()
 
+# --- ESTILOS CSS CON NEUTRALIZACIÓN DE PARPADEO (DATA-STALE) ---
 st.markdown("""
     <style>
     .block-container { padding-top: 1rem; padding-bottom: 0rem; }
@@ -16,14 +25,23 @@ st.markdown("""
     .en-curso { background-color: #27ae60; color: white; }
     .finalizada { background-color: #c0392b; color: white; }
     div[data-testid="stDataFrame"] { font-size: 1.1rem; }
+    
+    /* Anti-parpadeo para pantallas de transmisión continua */
+    div[data-stale="true"], .element-container[data-stale="true"] {
+        opacity: 1 !important;
+        filter: none !important;
+        transition: none !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 def cargar_db():
     try:
-        r = requests.get(DB_URL)
-        if r.status_code == 200 and r.json(): return r.json()
-    except: pass
+        r = requests.get(DB_ROOT_URL, timeout=5.0)
+        if r.status_code == 200 and r.json():
+            return r.json()
+    except requests.exceptions.RequestException:
+        pass
     return {}
 
 db = cargar_db()
@@ -240,7 +258,7 @@ def calcular_ranking_individual_tv(db_ref, rk_arma, rk_gen):
         
     activos, expulsados = [], []
     for _, row in df_gran_poule.iterrows():
-        est = next((e["estado_competencia"] for e in db_ref["Esgrimistas"] if e["nombre"] == row["Atleta"]), "Activo")
+        est = next((e.get("estado_competencia", "Activo") for e in db_ref.get("Esgrimistas", []) if e.get("nombre") == row["Atleta"]), "Activo")
         if est == "Expulsado":
             row["V/M"], row["Posición"] = "EXCLUIDO", "-"
             expulsados.append(row)
@@ -289,7 +307,7 @@ def generar_matriz_poule(db_ref, arma, genero):
                         combates[(ida, idb)] = (ta, tb)
                         combates[(idb, ida)] = (tb, ta)
                         
-    stats = {e["id_esgrimista"]: {"nombre": e["nombre"], "escuela": e["id_escuela"], "v":0, "m":0, "td":0, "tr":0, "expulsado": e["estado_competencia"] == "Expulsado"} for e in esgrimistas}
+    stats = {e["id_esgrimista"]: {"nombre": e["nombre"], "escuela": e["id_escuela"], "v":0, "m":0, "td":0, "tr":0, "expulsado": e.get("estado_competencia", "Activo") == "Expulsado"} for e in esgrimistas}
     for (ida, idb), (ta, tb) in combates.items():
         if ida in stats:
             stats[ida]["m"] += 1; stats[ida]["td"] += ta; stats[ida]["tr"] += tb
